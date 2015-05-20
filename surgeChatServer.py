@@ -100,31 +100,20 @@ class SurgeChatProtocol(basic.LineReceiver):
         print serverMsg
 
 
-
     def handle_CLIENT(self,line):
         inputMsg = json.loads(line)
         clientMsg = None
+
+        #verify that this is teh client and that the request isn't
+        #malicious
         if self.verifyIsClient(inputMsg) == False:
             print 'bad request from client', self.clientName
-            self.transport.write('ERROR: Improper Request')
+            self.transport.write('ERROR: Improper Request\n')
             return
 
-        print 'This is a Client Message!'
         clientMsg = json.loads(line)
-        self.clientName = clientMsg["senderID"]
+        print 'Message received from',clientMsg["senderID"]
         print clientMsg 
-
-        if self.clientName not in self.factory.connectedClients:
-            self.addClient()
-        else:
-            print self.clientName,'is in connected clients list'
-
-        #if client sends "goodbye", close the connection with the
-        #client, and if they are in the client list, delete them from the list
-        if line == 'goodbye':
-            print self.clientName, 'Disconnected'
-            self.transport.write('Farewell ' + self.clientName)
-            self.transport.loseConnection()
 
 
     #TODO: implement server verify
