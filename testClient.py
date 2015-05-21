@@ -6,22 +6,21 @@ from twisted.protocols import basic
 import json
 
 
-class SurgeTestClientProtocol(basic.LineReceiver):
+class SurgeTestClientProtocol(protocol.Protocol):
   senderID = random.randint(1,10)
-  clientMessage = '{"messageType":"surgeclient", "senderID":"'+ str(senderID) +'", "message":"a message!"}'
+  clientMessage = '{"clientType":"surgeclient" ,"messageType":"surgeclient", "senderID":"'+ str(senderID) +'", "message":"a message!"}'
 
   def connectionMade(self):
     print 'client connected'
-    self.sendLine(self.clientMessage)
+    self.transport.write(self.clientMessage)
 
   def connectionLost(self, reason):
     print 'connection has been lost'
 
-  def lineReceived(self, line):
+  def dataReceived(self, line):
     print 'line received'
     print 'line:',line
-    self.sendLine('message received by client.')
-    self.sendLine(self.end)
+    self.transport.write('message received by client.')
 
 
 class SurgeTestClientFactory(protocol.ClientFactory):

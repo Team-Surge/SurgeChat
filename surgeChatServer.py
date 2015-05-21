@@ -8,7 +8,7 @@ from twisted.internet.defer import Deferred
 from twisted.protocols import basic
 import json
 
-class SurgeChatProtocol(basic.LineReceiver):
+class SurgeChatProtocol(protocol.Protocol):
     #Protocols are like individual connections, thus, I can store
     #info about each individual connection (like a name) in this
     #class.
@@ -38,7 +38,7 @@ class SurgeChatProtocol(basic.LineReceiver):
 
     #Whenever the server recieves data from any of the clients, this method
     #will run
-    def lineReceived(self, line):
+    def dataReceived(self, line):
         #print self.factory.connectedClients
         if self.state == self.states.REGISTER:
             self.handle_REGISTER(line)
@@ -68,7 +68,7 @@ class SurgeChatProtocol(basic.LineReceiver):
             #deal. We will send a random string with length of 128 chars
             self.serverChallengeToken = randomMsg(128) 
             challengeMsg = '{"challenge":"' + self.serverChallengeToken + '"}'
-            self.sendLine(challengeMsg)
+            self.transport.write(challengeMsg)
             self.state = self.states.CHALLENGE_SERVER
 
         elif self.isClientMessage(inputMsg):
@@ -87,7 +87,7 @@ class SurgeChatProtocol(basic.LineReceiver):
 
             else:
                 print self.clientName,'is already connected to chat server'
-                self.sendLine('only 1 connection to chat server per user')
+                self.transport.write('only 1 connection to chat server per user')
 
                 #reset client name so we don't accidentally kick off the other
                 #connection
@@ -116,7 +116,7 @@ class SurgeChatProtocol(basic.LineReceiver):
         encryptedChallenge = 'lol' #TODO: encrypt same way tom does
         if parsedResponse["challengeResponse"] == encryptedChallenge:
           print 'The response is correct!'
-          self.sendLine('{"":""}')
+          self.transport.write('{"":""}')
           self.state = self.states.IS_SERVER
 
 
