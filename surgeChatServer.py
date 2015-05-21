@@ -2,30 +2,28 @@
 #File: surgeChatServer.py
 #Author: Nicholas Gingerella
 #Dependencies: Twisted
-import random
-import string
+from surgeUtilities import randomMsg, enum
 from twisted.internet import reactor, protocol, endpoints
 from twisted.internet.defer import Deferred
 from twisted.protocols import basic
 import json
 
-#generate random string
-def randomMsg(size = 10, chars = string.ascii_letters + string.digits):
-  return ''.join(random.choice(chars) for _ in range(size))
-
 class SurgeChatProtocol(basic.LineReceiver):
     #Protocols are like individual connections, thus, I can store
     #info about each individual connection (like a name) in this
-    #class. (NOT ENTIRELY SURE ABOUT THIS ;P)
-    state = 'REGISTER'
+    #class.
+    state = None
+    clientType = None
     clientName = ''
     serverChallengeToken = None
-
-
     #when a client makes a connection to the server, this runs
     def connectionMade(self):
         print 'new client connected'
         self.factory.client_count += 1
+        #initialize state and enumerators neede to maintain state
+        self.states = self.factory.states #list of states is in the factory, but doing this to type less later on
+        self.clientTypes = self.factory.clientTypes
+        self.state = self.states.REGISTER
 
 
     #when a client closes the connection, or the connection is lost,
@@ -35,23 +33,24 @@ class SurgeChatProtocol(basic.LineReceiver):
         if self.clientName in self.factory.connectedClients:
             del self.factory.connectedClients[self.clientName]
             print 'connection with',self.clientName,'has been lost!'
-            print 'current client count:', self.factory.client_count
+            print 'current client count:', self.factory.client_count 
 
 
     #Whenever the server recieves data from any of the clients, this method
     #will run
     def lineReceived(self, line):
         #print self.factory.connectedClients
-        if self.state == 'REGISTER':
+        if self.state == self.states.REGISTER:
             self.handle_REGISTER(line)
-        elif self.state == 'IS_CLIENT':
+        elif self.state == self.states.IS_CLIENT:
             self.handle_CLIENT(line)
-        elif self.state == 'CHALLENGE_SERVER':
+        elif self.state == self.states.CHALLENGE_SERVER:
             self.handle_CHALLENGE(line)
-        elif self.state == 'IS_SERVER':
+        elif self.state == self.states.IS_SERVER:
             self.handle_SERVER(line)
         else:
             print 'ERROR: UNKNOWN STATE!'
+            self.transport.loseConnection()
 
 
     def handle_REGISTER(self,line):
@@ -70,7 +69,7 @@ class SurgeChatProtocol(basic.LineReceiver):
             self.serverChallengeToken = randomMsg(128) 
             challengeMsg = '{"challenge":"' + self.serverChallengeToken + '"}'
             self.sendLine(challengeMsg)
-            self.state = 'CHALLENGE_SERVER'
+            self.state = self.states.CHALLENGE_SERVER
 
         elif self.isClientMessage(inputMsg):
             print 'This is a Client Message!'
@@ -84,11 +83,11 @@ class SurgeChatProtocol(basic.LineReceiver):
             #deny this connection
             if self.clientName not in self.factory.connectedClients:
                 self.addClient()
-                self.state = 'IS_CLIENT'
+                self.state = self.states.IS_CLIENT
 
             else:
                 print self.clientName,'is already connected to chat server'
-                self.transport.write('only 1 connection to chat server per user')
+                self.sendLine('only 1 connection to chat server per user')
 
                 #reset client name so we don't accidentally kick off the other
                 #connection
@@ -101,6 +100,7 @@ class SurgeChatProtocol(basic.LineReceiver):
             #this message was not formatted properly for either a normal client, nor the surge server
             print 'invalid request from client, closing client connection'
             self.transport.loseConnection()
+
 
     ################################################################################################
     #TODO: Implement AES encryption for initial authentication between Surge Server and Chat Server
@@ -117,7 +117,7 @@ class SurgeChatProtocol(basic.LineReceiver):
         if parsedResponse["challengeResponse"] == encryptedChallenge:
           print 'The response is correct!'
           self.sendLine('{"":""}')
-          self.state = 'IS_SERVER'
+          self.state = self.states.IS_SERVER
 
 
     ##########################################
@@ -217,10 +217,13 @@ class SurgeChatProtocol(basic.LineReceiver):
     #TODO: add "clientType" field 
     # is the json message formatted appropriately for a client message
     def isClientMessage(self,jsonMsg):
-        if 'messageType' not in jsonMsg:
+        if 'clientType' not in jsonMsg:
             return False
 
-        if jsonMsg['messageType'] != 'surgeclient':
+        if jsonMsg["clientType"] != 'surgeclient':
+            return False
+
+        if 'messageType' not in jsonMsg:
             return False
 
         if 'senderID' not in jsonMsg:
@@ -237,10 +240,13 @@ class SurgeChatProtocol(basic.LineReceiver):
     #TODO: add "serverType" field
     #is the json message formatted appropriately for a server message?
     def isServerMessage(self,jsonMsg):
-        if 'messageType' not in jsonMsg:
+        if 'clientType' not in jsonMsg:
+            return False
+        
+        if jsonMsg["clientType"] != 'surgeserver':
             return False
 
-        if jsonMsg['messageType'] != 'surgeserver':
+        if 'messageType' not in jsonMsg:
             return False
 
         if 'serverToken' not in jsonMsg:
@@ -266,6 +272,10 @@ class SurgeChatProtocol(basic.LineReceiver):
 #stores info about all connections
 class surgeFactory(protocol.ServerFactory):
     protocol = SurgeChatProtocol
+
+    #possible states and client types for chat server clients
+    states = enum('REGISTER','IS_CLIENT','IS_SERVER','CHALLENGE_SERVER')
+    clientTypes = enum('surgeserver', 'surgeclient')
 
     #number of clients that are currently connected to chat server
     client_count = 0

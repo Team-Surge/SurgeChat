@@ -7,7 +7,7 @@ import json
 
 #TODO: reorganize json fields (add clientType = server | client) and use messageType for Ack, Req, and Auth messages
 class SurgeTestServerProtocol(basic.LineReceiver):
-    clientMessage = '{"messageType":"surgeserver", "serverToken":"", "conversationID":"", "senderID":"", "recipientID":"", "message":"Im totally the server"}'
+    clientMessage = '{"clientType":"surgeserver", "messageType":"surgeserver", "serverToken":"", "conversationID":"", "senderID":"", "recipientID":"", "message":"Im totally the server"}'
 
     def connectionMade(self):
         print 'client connected'
