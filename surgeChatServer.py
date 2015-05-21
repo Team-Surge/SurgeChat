@@ -24,9 +24,8 @@ class SurgeChatProtocol(basic.LineReceiver):
 
     #when a client makes a connection to the server, this runs
     def connectionMade(self):
+        print 'new client connected'
         self.factory.client_count += 1
-        print 'new client'
-        print 'current client count:', self.factory.client_count
 
 
     #when a client closes the connection, or the connection is lost,
@@ -79,28 +78,40 @@ class SurgeChatProtocol(basic.LineReceiver):
             self.clientName = clientMsg["senderID"]
             print clientMsg 
 
+            #check if current connections userID already exists in the connected
+            #client dictionary, if so, this is a client is either an imposter or
+            #is trying to log in to chat from 2 different phones, which is not allowed.
+            #deny this connection
             if self.clientName not in self.factory.connectedClients:
                 self.addClient()
                 self.state = 'IS_CLIENT'
 
             else:
-                print self.clientName,'Client can only have 1 connection to server'
+                print self.clientName,'is already connected to chat server'
                 self.transport.write('only 1 connection to chat server per user')
 
                 #reset client name so we don't accidentally kick off the other
                 #connection
                 self.clientName = ''
+
+                #close this connection
                 self.transport.loseConnection()
+
         else:
+            #this message was not formatted properly for either a normal client, nor the surge server
             print 'invalid request from client, closing client connection'
             self.transport.loseConnection()
 
-
+    ################################################################################################
+    #TODO: Implement AES encryption for initial authentication between Surge Server and Chat Server
+    #      Details in the chat outline document
+    ################################################################################################
     #The server has sent me a response to my challenge, I will now check its
     #returned encoded string to see if it matches my encoded string
     def handle_CHALLENGE(self, line):
         print 'in handle challenge state!'
         parsedResponse = json.loads(line)
+
         print parsedResponse['challengeResponse']
         encryptedChallenge = 'lol' #TODO: encrypt same way tom does
         if parsedResponse["challengeResponse"] == encryptedChallenge:
@@ -109,8 +120,16 @@ class SurgeChatProtocol(basic.LineReceiver):
           self.state = 'IS_SERVER'
 
 
-    #TODO: implement server communication
-    #THIS IS THE CORE OF THE CHAT SERVER!!!
+    ##########################################
+    #TODO: Implement server communication
+    #      THIS IS THE CORE OF THE CHAT SERVER!!!
+    ##########################################
+    #when the server sends a valid message containing information about a message, such as the
+    #conversationID, senderID, recipientID, and message, I need to send the message to the 
+    #recipient in the context of the correct conversation. Of course, I need to make sure the
+    #recipient is connected to the chat server before I can send it, and if they are not connected,
+    #throw the message away, they'll retrieve it when the log into chat later on, since it is stored
+    #in the database
     def handle_SERVER(self, line):
         inputMsg = json.loads(line)
         serverMsg = None
@@ -126,6 +145,9 @@ class SurgeChatProtocol(basic.LineReceiver):
         print serverMsg
 
 
+    #At the moment, we won't expect too much info coming from individual clients. We need this
+    #to primarily handle the initial connection with the client, to make sure they get placed into
+    #the connected clients dictionary if they are logged into chat
     def handle_CLIENT(self,line):
         inputMsg = json.loads(line)
         clientMsg = None
@@ -142,7 +164,7 @@ class SurgeChatProtocol(basic.LineReceiver):
         print clientMsg 
 
 
-    #TODO: implement server verify
+    #TODO: implement server verify (MIGHT NOT BE NEEDED AFTER AUTHENTICATION IS IMPLEMENTED)
     #Check that there is only 1 connection that is a server
     def verifyIsServer(self, jsonMsg):
         #is the message in the proper format for a client
@@ -157,62 +179,105 @@ class SurgeChatProtocol(basic.LineReceiver):
     #Is this a properly formatted client AND is the senderID match up
     #with the name of the current connection (is this an imposter?)
     def verifyIsClient(self, jsonMsg):
-        #is the message in the proper format for a client
-        if self.isClientMessage(jsonMsg):
-            #does the senderID of the client message match the
-            #client name given to the current client
-            if jsonMsg["senderID"] == self.clientName:
-                #the client should be in the connectedClients list
-                if self.clientName in self.factory.connectedClients:
-                    return True
+        #the message must have the proper format for a client message
+        if not self.isClientMessage(jsonMsg):
+            return False
+
+        #the senderID must match the client name associated with this
+        #particular connection (to avoid users trying to imitate other users)
+        if jsonMsg["senderID"] != self.clientName:
+            return False
+
+        #the client should already exist in the connected clients list
+        #(how else would you get to this point?)
+        if self.clientName not in self.factory.connectedClients:
+            return False 
         
-        #the previous criteria didn't pass
-        return False
+        #The client passed through all of the checkpoints, in which case,
+        #it meets all of the criteria for a valid client message
+        return True 
 
 
     #add the name of the currently connected client to the connectedClients list
     def addClient(self):
         print 'adding',self.clientName,'to connected clients'
+
+        #add this client's protocol object to the dictionary, where the key is the
+        #id of the client and the value is the protcol object. The protocol object
+        #is needed in order to send data to the specific clients
         self.factory.connectedClients[self.clientName] = self
+
+        #print the ids of the currently connect clients
         print 'connected clients:',
         for key in self.factory.connectedClients:
             print key,
         print ''
 
-    
-    #is the json message formatted appropriately for a client message?
+
+    #TODO: add "clientType" field 
+    # is the json message formatted appropriately for a client message
     def isClientMessage(self,jsonMsg):
-        if 'messageType' in jsonMsg:
-            if jsonMsg['messageType'] != 'surgeclient':
-                return False
-            if 'senderID' in jsonMsg:
-                if 'message' in jsonMsg:
-                    return True
-        return False
+        if 'messageType' not in jsonMsg:
+            return False
+
+        if jsonMsg['messageType'] != 'surgeclient':
+            return False
+
+        if 'senderID' not in jsonMsg:
+            return False
+
+        if 'message' not in jsonMsg:
+            return False
+
+        # all the previous conditions didn't hold, so we have
+        # a valid client message
+        return True
 
 
+    #TODO: add "serverType" field
     #is the json message formatted appropriately for a server message?
     def isServerMessage(self,jsonMsg):
-        if 'messageType' in jsonMsg:
-            if jsonMsg['messageType'] != 'surgeserver':
-                return False
-            if 'serverToken' in jsonMsg:
-              if 'conversationID' in jsonMsg:
-                  if 'senderID' in jsonMsg:
-                      if 'recipientID' in jsonMsg:
-                            if 'message' in jsonMsg:
-                                return True
-        return False
-            
+        if 'messageType' not in jsonMsg:
+            return False
 
+        if jsonMsg['messageType'] != 'surgeserver':
+            return False
+
+        if 'serverToken' not in jsonMsg:
+            return False
+
+        if 'conversationID' not in jsonMsg:
+            return False
+
+        if 'senderID' not in jsonMsg:
+            return False
+        
+        if 'recipientID' not in jsonMsg:
+            return False
+
+        if 'message' not in jsonMsg:
+            return False
+        
+        # all the previous conditions didn't hold, so we have
+        # a valid server message
+        return True
 
 
 #stores info about all connections
 class surgeFactory(protocol.ServerFactory):
     protocol = SurgeChatProtocol
-    surgeServerID = 'Surge1234' 
+
+    #number of clients that are currently connected to chat server
     client_count = 0
+
+    #dictionary of connected clients, keys are user ids, values
+    #are protocols that belong to the respective user connections
     connectedClients = {}
+
+    #dictionary of currently active conversations between two clients
+    #needed since its possible for a client to have multiple chat
+    #instances open with different users, thus I need to make sure that
+    #the conversationID and the message are sent to the recipient
     openConversations = {}
 
 
