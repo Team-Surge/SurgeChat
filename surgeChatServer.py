@@ -2,11 +2,16 @@
 #File: surgeChatServer.py
 #Author: Nicholas Gingerella
 #Dependencies: Twisted
-
+import random
+import string
 from twisted.internet import reactor, protocol, endpoints
 from twisted.internet.defer import Deferred
 from twisted.protocols import basic
 import json
+
+#generate random string
+def randomMsg(size = 10, chars = string.ascii_letters + string.digits):
+  return ''.join(random.choice(chars) for _ in range(size))
 
 class SurgeChatProtocol(basic.LineReceiver):
     #Protocols are like individual connections, thus, I can store
@@ -14,7 +19,7 @@ class SurgeChatProtocol(basic.LineReceiver):
     #class. (NOT ENTIRELY SURE ABOUT THIS ;P)
     state = 'REGISTER'
     clientName = ''
-
+    serverChallengeToken = None
 
 
     #when a client makes a connection to the server, this runs
@@ -42,6 +47,8 @@ class SurgeChatProtocol(basic.LineReceiver):
             self.handle_REGISTER(line)
         elif self.state == 'IS_CLIENT':
             self.handle_CLIENT(line)
+        elif self.state == 'CHALLENGE_SERVER':
+            self.handle_CHALLENGE(line)
         elif self.state == 'IS_SERVER':
             self.handle_SERVER(line)
         else:
@@ -54,11 +61,17 @@ class SurgeChatProtocol(basic.LineReceiver):
         clientMsg = None
 
         if self.isServerMessage(inputMsg):
-            print 'This is a Server Message!'
+            print 'This is the Server Message!'
             serverMsg = json.loads(line)
-            print serverMsg 
-            self.clientName = 'SERVER-ID'
-            self.state = 'IS_SERVER'
+            print serverMsg
+            
+            #This is the initial connection message from the server
+            #Now we need to challenge it to make sure it's the real
+            #deal. We will send a random string with length of 128 chars
+            self.serverChallengeToken = randomMsg(128) 
+            challengeMsg = '{"challenge":"' + self.serverChallengeToken + '"}'
+            self.sendLine(challengeMsg)
+            self.state = 'CHALLENGE_SERVER'
 
         elif self.isClientMessage(inputMsg):
             print 'This is a Client Message!'
@@ -83,6 +96,19 @@ class SurgeChatProtocol(basic.LineReceiver):
             self.transport.loseConnection()
 
 
+    #The server has sent me a response to my challenge, I will now check its
+    #returned encoded string to see if it matches my encoded string
+    def handle_CHALLENGE(self, line):
+        print 'in handle challenge state!'
+        parsedResponse = json.loads(line)
+        print parsedResponse['challengeResponse']
+        encryptedChallenge = 'lol' #TODO: encrypt same way tom does
+        if parsedResponse["challengeResponse"] == encryptedChallenge:
+          print 'The response is correct!'
+          self.sendLine('{"":""}')
+          self.state = 'IS_SERVER'
+
+
     #TODO: implement server communication
     #THIS IS THE CORE OF THE CHAT SERVER!!!
     def handle_SERVER(self, line):
@@ -90,7 +116,7 @@ class SurgeChatProtocol(basic.LineReceiver):
         serverMsg = None
         
         #do nothing if the server doesn't verify
-        if self.verifyIsServer(inputMsg) == False:
+        if self.isServerMessage(inputMsg) == False:
             print 'server failed verification'
             return
 
@@ -170,10 +196,10 @@ class SurgeChatProtocol(basic.LineReceiver):
         if 'messageType' in jsonMsg:
             if jsonMsg['messageType'] != 'surgeserver':
                 return False
-            if 'conversationID' in jsonMsg:
-                if 'senderID' in jsonMsg:
-                    if 'recipientID' in jsonMsg:
-                        if jsonMsg['senderID'] != jsonMsg['recipientID']:
+            if 'serverToken' in jsonMsg:
+              if 'conversationID' in jsonMsg:
+                  if 'senderID' in jsonMsg:
+                      if 'recipientID' in jsonMsg:
                             if 'message' in jsonMsg:
                                 return True
         return False
@@ -184,6 +210,7 @@ class SurgeChatProtocol(basic.LineReceiver):
 #stores info about all connections
 class surgeFactory(protocol.ServerFactory):
     protocol = SurgeChatProtocol
+    surgeServerID = 'Surge1234' 
     client_count = 0
     connectedClients = {}
     openConversations = {}
