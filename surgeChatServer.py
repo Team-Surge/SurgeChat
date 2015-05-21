@@ -37,7 +37,7 @@ class SurgeChatProtocol(basic.LineReceiver):
     #Whenever the server recieves data from any of the clients, this method
     #will run
     def lineReceived(self, line):
-        print self.factory.connectedClients
+        #print self.factory.connectedClients
         if self.state == 'REGISTER':
             self.handle_REGISTER(line)
         elif self.state == 'IS_CLIENT':
@@ -148,7 +148,10 @@ class SurgeChatProtocol(basic.LineReceiver):
     def addClient(self):
         print 'adding',self.clientName,'to connected clients'
         self.factory.connectedClients[self.clientName] = self
-        print self.factory.connectedClients
+        print 'connected clients:',
+        for key in self.factory.connectedClients:
+            print key,
+        print ''
 
     
     #is the json message formatted appropriately for a client message?
