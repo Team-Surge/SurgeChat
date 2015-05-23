@@ -1,7 +1,9 @@
 #!/bin/python
 #File: surgeChatServer.py
 #Author: Nicholas Gingerella
-#Dependencies: Twisted
+
+import base64
+from Crypto.Cipher import AES
 from surgeUtilities import randomMsg, enum
 from twisted.internet import reactor, protocol, endpoints
 from twisted.internet.defer import Deferred
@@ -58,7 +60,7 @@ class SurgeChatProtocol(protocol.Protocol):
         serverMsg = None
         clientMsg = None
 
-        if self.isServerMessage(inputMsg):
+        if self.isServerAuthRequest(inputMsg):
             print 'This is the Server Message!'
             serverMsg = json.loads(line)
             print serverMsg
@@ -67,7 +69,8 @@ class SurgeChatProtocol(protocol.Protocol):
             #Now we need to challenge it to make sure it's the real
             #deal. We will send a random string with length of 128 chars
             self.serverChallengeToken = randomMsg(128) 
-            challengeMsg = '{"challenge":"' + self.serverChallengeToken + '"}'
+            challengeMsg = '{ "clientType":"surgechat", "messageType":"challenge", "challengeToken":"' + self.serverChallengeToken + '"}'
+            print challengeMsg
             self.transport.write(challengeMsg)
             self.state = self.states.CHALLENGE_SERVER
 
@@ -109,15 +112,22 @@ class SurgeChatProtocol(protocol.Protocol):
     #The server has sent me a response to my challenge, I will now check its
     #returned encoded string to see if it matches my encoded string
     def handle_CHALLENGE(self, line):
+        print ''
         print 'in handle challenge state!'
         parsedResponse = json.loads(line)
 
-        print parsedResponse['challengeResponse']
-        encryptedChallenge = 'lol' #TODO: encrypt same way tom does
-        if parsedResponse["challengeResponse"] == encryptedChallenge:
-          print 'The response is correct!'
-          self.transport.write('{"":""}')
-          self.state = self.states.IS_SERVER
+        # Decryption
+        decryption_suite = AES.new(self.factory.aesKey, AES.MODE_CBC, parsedResponse["responseIV"])
+        responseToken = decryption_suite.decrypt(base64.b64decode(parsedResponse["responseToken"]))
+
+        print parsedResponse
+        if responseToken == self.serverChallengeToken:
+            print 'The response is correct!'
+            self.transport.write('{"clientType":"chatserver", "messageType":"OK"}')
+            self.state = self.states.IS_SERVER
+        else:
+            print 'Surge response is bad'
+            self.transport.write('{"clientType":"chatserver", "messageType":"FAIL"}')
 
 
     ##########################################
@@ -164,16 +174,21 @@ class SurgeChatProtocol(protocol.Protocol):
         print clientMsg 
 
 
-    #TODO: implement server verify (MIGHT NOT BE NEEDED AFTER AUTHENTICATION IS IMPLEMENTED)
-    #Check that there is only 1 connection that is a server
-    def verifyIsServer(self, jsonMsg):
-        #is the message in the proper format for a client
-        if self.isServerMessage(jsonMsg):
-            print 'proper server message'
-            return True
-        
-        #the previous criteria didn't pass
-        return False
+    #add the name of the currently connected client to the connectedClients list
+    def addClient(self):
+        print 'adding',self.clientName,'to connected clients'
+
+        #add this client's protocol object to the dictionary, where the key is the
+        #id of the client and the value is the protcol object. The protocol object
+        #is needed in order to send data to the specific clients
+        self.factory.connectedClients[self.clientName] = self
+
+        #print the ids of the currently connect clients
+        print 'connected clients:',
+        for key in self.factory.connectedClients:
+            print key,
+        print ''
+
 
 
     #Is this a properly formatted client AND is the senderID match up
@@ -198,23 +213,25 @@ class SurgeChatProtocol(protocol.Protocol):
         return True 
 
 
-    #add the name of the currently connected client to the connectedClients list
-    def addClient(self):
-        print 'adding',self.clientName,'to connected clients'
 
-        #add this client's protocol object to the dictionary, where the key is the
-        #id of the client and the value is the protcol object. The protocol object
-        #is needed in order to send data to the specific clients
-        self.factory.connectedClients[self.clientName] = self
-
-        #print the ids of the currently connect clients
-        print 'connected clients:',
-        for key in self.factory.connectedClients:
-            print key,
-        print ''
+    #is this a serve authorizaton request?
+    def isServerAuthRequest(self,jsonMsg):
+        if ('clientType' in jsonMsg) and ('messageType' in jsonMsg):
+            if (jsonMsg["clientType"] == 'surgeserver') and (jsonMsg["messageType"] == 'connectRequest'):
+                return True
+        else:
+            return False
 
 
-    #TODO: add "clientType" field 
+    #is this a serve authorizaton request?
+    def isServerChallengeResponse(self,jsonMsg):
+        responseMsgKeys = ('clientType','messageType','responseToken','responseIV')
+        if all (field in jsonMsg for field in responseMsgKeys):
+            return True
+        else:
+            return False
+
+
     # is the json message formatted appropriately for a client message
     def isClientMessage(self,jsonMsg):
         if 'clientType' not in jsonMsg:
@@ -279,6 +296,8 @@ class surgeFactory(protocol.ServerFactory):
 
     #number of clients that are currently connected to chat server
     client_count = 0
+
+    aesKey = 'My AES Key bitch'
 
     #dictionary of connected clients, keys are user ids, values
     #are protocols that belong to the respective user connections

@@ -1,13 +1,13 @@
-import random
-import time
+import base64
+from Crypto.Cipher import AES
+from surgeUtilities import *
 from twisted.internet import reactor, protocol, endpoints
 from twisted.internet.defer import Deferred
 from twisted.protocols import basic
 import json
 
-#TODO: reorganize json fields (add clientType = server | client) and use messageType for Ack, Req, and Auth messages
 class SurgeTestServerProtocol(protocol.Protocol):
-    clientMessage = '{"clientType":"surgeserver", "messageType":"surgeserver", "serverToken":"", "conversationID":"", "senderID":"", "recipientID":"", "message":"Im totally the server"}'
+    clientMessage = '{"clientType":"surgeserver", "messageType": "connectRequest"}'
 
     def connectionMade(self):
         print 'client connected'
@@ -17,18 +17,35 @@ class SurgeTestServerProtocol(protocol.Protocol):
         print 'connection has been lost'
 
     def dataReceived(self, data):
+        print ''
+        print 'received a message!'
         msg = json.loads(data)
-        if 'challenge' in msg:
+
+        #check if all required fields are in the message
+        challengeMsgKeys = ('clientType', 'messageType', 'challengeToken')
+        if all (field in msg for field in challengeMsgKeys):
+          if (msg['clientType'] == 'surgechat') and (msg['messageType'] == 'challenge'):
             print 'I HAZ BEEN CHALLENGED!'
-            print 'challenge token:',msg["challenge"]
-            challengeResponse = 'lol'
-            self.transport.write('{"challengeResponse":"' + challengeResponse + '"}')
+            print 'challenge token:',msg["challengeToken"]
+
+            #do the AES encryption on the received challengeToken
+            aesIV = randomMsg(16)
+            encryption_suite = AES.new(self.factory.aesKey, AES.MODE_CBC, aesIV)
+            cipherText = encryption_suite.encrypt(msg["challengeToken"])
+            b64cipherText = base64.b64encode(cipherText)
+
+            challengeResponse = '{"clientType":"surgeserver", "messageType":"challengeResponse", "responseToken":"' + b64cipherText + '", "responseIV":"' + aesIV + '"}'
+            print challengeResponse
+            self.transport.write(challengeResponse)
         else:
-            print 'this is not a challenge'
+          print(msg)
+          
+
 
 
 class SurgeTestClientFactory(protocol.ClientFactory):
     protocol = SurgeTestServerProtocol
+    aesKey = 'My AES Key bitch'
     
     def clientConnectionFailed(self, connector, reason):
       print 'connection failed'

@@ -1,12 +1,8 @@
 import os
 import string
-import random
+from surgeUtilities import *
 import base64
 from Crypto.Cipher import AES
-
-#generate random string
-def randomMsg(size = 10, chars = string.ascii_letters + string.digits):
-  return ''.join(random.choice(chars) for _ in range(size))
 
 randomMsg = randomMsg(128)
 print randomMsg
@@ -21,16 +17,12 @@ aesIV = 'ouR 1v is super!' #Tom will randomly generate a 16byte IV string, and s
 # Encryption
 encryption_suite = AES.new(aesKey, AES.MODE_CBC, aesIV)
 cipher_text = encryption_suite.encrypt(randomMsg)
-
-
-
-
+cipher_base64 = base64.b64encode(cipher_text)
 
 #=========CHAT SERVER SIDE=========#
 # Tom needs to send the encrypted data to me over the network, so he will need to base64 encode the 
 # result of his encryption. I'll base64 decode the original encrypted message on my end, and then
 # decrypt the aes encrypted message using the IV string tom will also send along with it
-cipher_base64 = base64.b64encode(cipher_text)
 print cipher_text
 print cipher_base64
 
