@@ -1,3 +1,4 @@
+#!/bin/env/python
 import base64
 from Crypto.Cipher import AES
 from surgeUtilities import *
@@ -35,7 +36,6 @@ class SurgeTestServerProtocol(protocol.Protocol):
             b64cipherText = base64.b64encode(cipherText)
 
             challengeResponse = '{"clientType":"surgeserver", "messageType":"challengeResponse", "responseToken":"' + b64cipherText + '", "responseIV":"' + aesIV + '"}'
-            print challengeResponse
             self.transport.write(challengeResponse)
         else:
           print(msg)

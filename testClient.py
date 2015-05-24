@@ -1,5 +1,5 @@
-import random
-import time
+#!/bin/env/python
+from surgeUtilities import *
 from twisted.internet import reactor, protocol, endpoints
 from twisted.internet.defer import Deferred
 from twisted.protocols import basic
@@ -8,7 +8,7 @@ import json
 
 class SurgeTestClientProtocol(protocol.Protocol):
   senderID = random.randint(1,10)
-  clientMessage = '{"clientType":"surgeclient" ,"messageType":"surgeclient", "senderID":"'+ str(senderID) +'", "message":"a message!"}'
+  clientMessage = '{"clientType":"surgeclient" ,"messageType":"connect", "senderID":"'+ str(senderID) +'"}'
 
   def connectionMade(self):
     print 'client connected'
@@ -18,9 +18,9 @@ class SurgeTestClientProtocol(protocol.Protocol):
     print 'connection has been lost'
 
   def dataReceived(self, line):
-    print 'line received'
-    print 'line:',line
-    self.transport.write('message received by client.')
+    print line
+    msg = json.loads(line)
+    print msg["senderID"] + ':', msg["message"]
 
 
 class SurgeTestClientFactory(protocol.ClientFactory):

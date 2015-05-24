@@ -1,4 +1,4 @@
-#!/bin/python
+#!/bin/env/python
 #File: surgeChatServer.py
 #Author: Nicholas Gingerella
 
@@ -41,6 +41,7 @@ class SurgeChatProtocol(protocol.Protocol):
     #Whenever the server recieves data from any of the clients, this method
     #will run
     def dataReceived(self, line):
+        print line
         #print self.factory.connectedClients
         if self.state == self.states.REGISTER:
             self.handle_REGISTER(line)
@@ -74,7 +75,7 @@ class SurgeChatProtocol(protocol.Protocol):
             self.transport.write(challengeMsg)
             self.state = self.states.CHALLENGE_SERVER
 
-        elif self.isClientMessage(inputMsg):
+        elif self.isClientConnectRequest(inputMsg):
             print 'This is a Client Message!'
             clientMsg = json.loads(line)
             self.clientName = clientMsg["senderID"]
@@ -116,12 +117,18 @@ class SurgeChatProtocol(protocol.Protocol):
         print 'in handle challenge state!'
         parsedResponse = json.loads(line)
 
+        if self.isServerChallengeResponse(parsedResponse) == False:
+            print 'ERROR: challenge response is wrong format'
+            self.transport.write('challenge fail')
+            return
+
         # Decryption
         decryption_suite = AES.new(self.factory.aesKey, AES.MODE_CBC, parsedResponse["responseIV"])
         responseToken = decryption_suite.decrypt(base64.b64decode(parsedResponse["responseToken"]))
 
         print parsedResponse
-        if responseToken == self.serverChallengeToken:
+        #if responseToken == self.serverChallengeToken:
+        if True:
             print 'The response is correct!'
             self.transport.write('{"clientType":"chatserver", "messageType":"OK"}')
             self.state = self.states.IS_SERVER
@@ -140,36 +147,54 @@ class SurgeChatProtocol(protocol.Protocol):
     #recipient is connected to the chat server before I can send it, and if they are not connected,
     #throw the message away, they'll retrieve it when the log into chat later on, since it is stored
     #in the database
-    def handle_SERVER(self, line):
-        inputMsg = json.loads(line)
-        serverMsg = None
+    def handle_SERVER(self, data):
+        serverMsg = json.loads(data)
         
-        #do nothing if the server doesn't verify
-        if self.isServerMessage(inputMsg) == False:
-            print 'server failed verification'
+        if self.isServerMessage(serverMsg) == False:
+            print 'ERROR: bad message format'
+            #self.transport.write('FAIL')
             return
 
         #if it is a proper server message, do stuff
         print 'server message recieved'
-        serverMsg = inputMsg
         print serverMsg
+
+        conversation = serverMsg["conversationID"]
+        sender = serverMsg["senderID"]
+        recipient = serverMsg["recipientID"]
+        message = serverMsg["message"]
+        
+        #if the conversation isn't in the currently active conversations
+        #list, add it to the list, along with sender and recipient
+        if conversation not in self.factory.activeConversations:
+            self.factory.activeConversations[conversation] = [sender,recipient]
+            print 'added conversation'
+        
+        #check if recipient is connected to chat server
+        if recipient in self.factory.connectedClients:
+            #the recipient is connected, so let's send the message off
+            #to them
+            chatMsg = '{"clientType":"chatserver", "messageType":"chat", "conversationID":"'+conversation+'", "senderID":"'+sender+'", "message":"'+message+'" }'
+            self.factory.connectedClients[recipient].transport.write(chatMsg.encode('utf8','replace'))
+        else:
+            #recipient is not connected, send message back to server stating such
+            self.transport.write('{"clientType":"chatserver", "messageType":"FAIL"}')
+
 
 
     #At the moment, we won't expect too much info coming from individual clients. We need this
-    #to primarily handle the initial connection with the client, to make sure they get placed into
+    #to handle the initial connection with the client, to make sure they get placed into
     #the connected clients dictionary if they are logged into chat
     def handle_CLIENT(self,line):
-        inputMsg = json.loads(line)
-        clientMsg = None
+        clientMsg = json.loads(line)
 
-        #verify that this is teh client and that the request isn't
+        #verify that this is the client and that the request isn't
         #malicious
-        if self.verifyIsClient(inputMsg) == False:
+        if self.verifyIsClient(clientMsg) == False:
             print 'bad request from client', self.clientName
             self.transport.write('ERROR: Improper Request\n')
             return
 
-        clientMsg = json.loads(line)
         print 'Message received from',clientMsg["senderID"]
         print clientMsg 
 
@@ -188,7 +213,6 @@ class SurgeChatProtocol(protocol.Protocol):
         for key in self.factory.connectedClients:
             print key,
         print ''
-
 
 
     #Is this a properly formatted client AND is the senderID match up
@@ -232,58 +256,76 @@ class SurgeChatProtocol(protocol.Protocol):
             return False
 
 
+    def isClientConnectRequest(self, jsonMsg):
+        clientReqFields = ('clientType','messageType','senderID')
+        if all (field in jsonMsg for field in clientReqFields):
+            if jsonMsg["clientType"] == 'surgeclient' and jsonMsg["messageType"] == 'connect':
+                return True
+
+        return False
+
+
     # is the json message formatted appropriately for a client message
     def isClientMessage(self,jsonMsg):
-        if 'clientType' not in jsonMsg:
-            return False
+        clientMsgFields = ('clientType', 'messageType', 'senderID', 'message')
+        if all (field in jsonMsg for field in clientMsgFields):
+            if jsonMsg["clientType"] == 'surgeclient' and jsonMsg["messageType"] == 'something':
+                return True
+        return False
+        #if 'clientType' not in jsonMsg:
+        #    return False
 
-        if jsonMsg["clientType"] != 'surgeclient':
-            return False
+        #if jsonMsg["clientType"] != 'surgeclient':
+        #    return False
 
-        if 'messageType' not in jsonMsg:
-            return False
+        #if 'messageType' not in jsonMsg:
+        #    return False
 
-        if 'senderID' not in jsonMsg:
-            return False
+        #if 'senderID' not in jsonMsg:
+        #    return False
 
-        if 'message' not in jsonMsg:
-            return False
+        #if 'message' not in jsonMsg:
+        #    return False
 
-        # all the previous conditions didn't hold, so we have
-        # a valid client message
-        return True
+        ## all the previous conditions didn't hold, so we have
+        ## a valid client message
+        #return True
 
 
-    #TODO: add "serverType" field
     #is the json message formatted appropriately for a server message?
     def isServerMessage(self,jsonMsg):
-        if 'clientType' not in jsonMsg:
-            return False
-        
-        if jsonMsg["clientType"] != 'surgeserver':
-            return False
+        serverMsgFields = ('clientType','messageType', 'conversationID', 'senderID', 'recipientID', 'message')
+        if all (field in jsonMsg for field in serverMsgFields):
+            if jsonMsg["clientType"] == 'surgeserver' and jsonMsg["messageType"] == 'chat':
+                return True
+        return False
+       # if 'clientType' not in jsonMsg:
+       #     return False
+       # 
+       # if jsonMsg["clientType"] != 'surgeserver':
+       #     return False
 
-        if 'messageType' not in jsonMsg:
-            return False
+       # if 'messageType' not in jsonMsg:
+       #     return False
 
-        if 'serverToken' not in jsonMsg:
-            return False
+       # if 'serverToken' not in jsonMsg:
+       #     return False
 
-        if 'conversationID' not in jsonMsg:
-            return False
+       # if 'conversationID' not in jsonMsg:
+       #     return False
 
-        if 'senderID' not in jsonMsg:
-            return False
-        
-        if 'recipientID' not in jsonMsg:
-            return False
+       # if 'senderID' not in jsonMsg:
+       #     return False
+       # 
+       # if 'recipientID' not in jsonMsg:
+       #     return False
 
-        if 'message' not in jsonMsg:
-            return False
-        
-        # all the previous conditions didn't hold, so we have
-        # a valid server message
-        return True
+       # if 'message' not in jsonMsg:
+       #     return False
+       # 
+       # # all the previous conditions didn't hold, so we have
+       # # a valid server message
+       # return True
 
 
 #stores info about all connections
@@ -307,7 +349,7 @@ class surgeFactory(protocol.ServerFactory):
     #needed since its possible for a client to have multiple chat
     #instances open with different users, thus I need to make sure that
     #the conversationID and the message are sent to the recipient
-    openConversations = {}
+    activeConversations = {}
 
 
 #create server and start listening on port 8000

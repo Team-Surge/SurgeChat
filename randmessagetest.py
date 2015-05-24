@@ -1,3 +1,4 @@
+#!/bin/env/python
 import os
 import string
 from surgeUtilities import *
