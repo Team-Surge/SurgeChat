@@ -20,12 +20,8 @@ class SurgeTestClientProtocol(protocol.Protocol):
 
   def dataReceived(self, line):
     print line
-    try:
-      msg = json.loads(line)
-      print msg["senderID"] + ':', msg["message"]
-    except:
-      sys.exit()
-      pass
+    msg = json.loads(line)
+    print msg["message"]
 
 
 class SurgeTestClientFactory(protocol.ClientFactory):

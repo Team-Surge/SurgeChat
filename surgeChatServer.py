@@ -89,9 +89,10 @@ class SurgeChatProtocol(protocol.Protocol):
             #Now we need to challenge it to make sure it's the real
             #deal. We will send a random string with length of 128 chars
             self.serverChallengeToken = randomMsg(128) 
-            challengeMsg = '{ "clientType":"surgechat", "messageType":"challenge", "challengeToken":"' + self.serverChallengeToken + '"}'
+            challengeMsg = '{"clientType":"surgechat", "messageType":"challenge", "challengeToken":"' + self.serverChallengeToken + '"}\n'
             #print challengeMsg
             self.transport.write(challengeMsg)
+            print 'sent challenge'
             self.state = self.states.CHALLENGE_SERVER
 
         elif self.isClientConnectRequest(inputMsg):
@@ -141,18 +142,17 @@ class SurgeChatProtocol(protocol.Protocol):
             return
 
         # Decryption
-        decryption_suite = AES.new(self.factory.aesKey, AES.MODE_CBC, parsedResponse["responseIV"])
+        decryption_suite = AES.new(self.factory.aesKey, AES.MODE_CBC, base64.b64decode(parsedResponse["responseIV"]))
         responseToken = decryption_suite.decrypt(base64.b64decode(parsedResponse["responseToken"]))
 
         #print parsedResponse
-        #if responseToken == self.serverChallengeToken:
-        if True:
+        if responseToken == self.serverChallengeToken:
             print 'The response is correct!'
-            self.transport.write('{"clientType":"chatserver", "messageType":"OK"}')
+            self.transport.write('{"clientType":"chatserver", "messageType":"OK"}\n')
             self.state = self.states.IS_SERVER
         else:
             print 'Surge response is bad'
-            self.transport.write('{"clientType":"chatserver", "messageType":"FAIL"}')
+            self.transport.write('{"clientType":"chatserver", "messageType":"FAIL"}\n')
 
 
     ##########################################
@@ -179,63 +179,70 @@ class SurgeChatProtocol(protocol.Protocol):
 
         #TODO: Tom is going to send me a list of user id's instead. So I can just iterate through
         #the list and send off messages (so start factoring out sender and recipient)
-        conversation = serverMsg["conversationID"]
+        #conversation = serverMsg["conversationID"]
         sender = serverMsg["senderID"]
-        recipient = serverMsg["recipientID"]
+        recipients = serverMsg["recipientID"]
+        recipients.remove(sender)
         message = serverMsg["message"]
         
         
-        if self.isConnectedClient(sender) == True:
-            chatMsg = '{"clientType":"chatserver", "messageType":"chat", "conversationID":"'+conversation+'", "senderID":"'+sender+'", "message":"'+message+'" }'
+        #if self.isConnectedClient(sender) == True:
+        if True:
+            #chatMsg = '{"clientType":"chatserver", "messageType":"chat", "conversationID":"'+conversation+'", "senderID":"'+sender+'", "message":"'+message+'"}\n'
+            chatMsg = '{"clientType":"chatserver", "messageType":"chat", "message":'+message+'}\n'
 
             #NOTE: when tom sends me the list of recipients, all I have to do is send info off to them. Conversation IDs aren't even
             #needed
-            #for user in recipients:
-            #    self.factory.connectedClients[user]["connection"].transport.write(chatMsg.encode('utf8','replace'))
+            for user in recipients:
+                if self.isConnectedClient(str(user)):
+                    print 'sending to',user
+                    self.factory.connectedClients[str(user)]["connection"].transport.write(chatMsg.encode('utf8','replace'))
+                else:
+                    print 'clients not connected'
 
             #if the conversation isn't in the currently active conversations
             #list, add it to the list, along with sender and recipient
-            if conversation not in self.factory.activeConversations:
-                #add conversation to active conversations, and associate it with sender and recipient
-                #NOTE: to generalize for group messaging, surgeserver should send down a list of everyone
-                #      who is associated with the conversation. This way I can iterate through the list and send
-                #      them all off to connected clients who are associated with the conversation
-                self.factory.activeConversations[conversation] = set()
-                self.factory.activeConversations[conversation].add(sender)
-                self.factory.activeConversations[conversation].add(recipient)
-                #for user in recipients:
-                #   self.factory.activeConversations[conversation].add(user)
+            #if conversation not in self.factory.activeConversations:
+            #    #add conversation to active conversations, and associate it with sender and recipient
+            #    #NOTE: to generalize for group messaging, surgeserver should send down a list of everyone
+            #    #      who is associated with the conversation. This way I can iterate through the list and send
+            #    #      them all off to connected clients who are associated with the conversation
+            #    self.factory.activeConversations[conversation] = set()
+            #    self.factory.activeConversations[conversation].add(sender)
+            #    self.factory.activeConversations[conversation].add(recipient)
+            #    #for user in recipients:
+            #    #   self.factory.activeConversations[conversation].add(user)
 
-                if sender in self.factory.activeConversations[conversation]:
-                    for user in self.factory.activeConversations[conversation]:
-                        #forward the message to every user except for the sender, as long as they are connected
-                        #also make sure they have an association with the conversation
-                        if self.isConnectedClient(user):
-                            self.factory.connectedClients[user]["conversations"].add(conversation)
-                            if user != sender and self.isConnectedClient(recipient):
-                                self.factory.connectedClients[recipient]["connection"].transport.write(chatMsg.encode('utf8','replace'))
-                    print self.factory.connectedClients
-                else:
-                    print 'sender is not a part of conversation ' + conversation
-            else:
-                #the conversation exists, and for each user in the conversation, forward the senders
-                #message to them
-                #NOTE: This is not necessary for conversations limited to 2 clients, but allows us to implement
-                #      group chats later on, where there can be more than 2 users in a single conversation
-                if sender in self.factory.activeConversations[conversation]:
-                    for user in self.factory.activeConversations[conversation]:
-                        #forward the message to every user except for the sender, as long as they are connected
-                        #also make sure they have an association with the conversation
-                        if self.isConnectedClient(user):
-                            self.factory.connectedClients[user]["conversations"].add(conversation)
-                            if user != sender and self.isConnectedClient(recipient):
-                                self.factory.connectedClients[recipient]["connection"].transport.write(chatMsg.encode('utf8','replace'))
-                    print self.factory.connectedClients
-                else:
-                    print 'sender is not a part of conversation ' + conversation
+            ##    if sender in self.factory.activeConversations[conversation]:
+            #        for user in self.factory.activeConversations[conversation]:
+            #            #forward the message to every user except for the sender, as long as they are connected
+            #            #also make sure they have an association with the conversation
+            #            if self.isConnectedClient(user):
+            #                self.factory.connectedClients[user]["conversations"].add(conversation)
+            #                if user != sender and self.isConnectedClient(recipient):
+            #                    self.factory.connectedClients[recipient]["connection"].transport.write(chatMsg.encode('utf8','replace'))
+            #        print self.factory.connectedClients
+            #    else:
+            #        print 'sender is not a part of conversation ' + conversation
+            #else:
+            #    #the conversation exists, and for each user in the conversation, forward the senders
+            #    #message to them
+            #    #NOTE: This is not necessary for conversations limited to 2 clients, but allows us to implement
+            #    #      group chats later on, where there can be more than 2 users in a single conversation
+            #    if sender in self.factory.activeConversations[conversation]:
+            #        for user in self.factory.activeConversations[conversation]:
+            #            #forward the message to every user except for the sender, as long as they are connected
+            #            #also make sure they have an association with the conversation
+            #            if self.isConnectedClient(user):
+            #                self.factory.connectedClients[user]["conversations"].add(conversation)
+            #                if user != sender and self.isConnectedClient(recipient):
+            #                    self.factory.connectedClients[recipient]["connection"].transport.write(chatMsg.encode('utf8','replace'))
+            #        print self.factory.connectedClients
+            #    else:
+            #        print 'sender is not a part of conversation ' + conversation
         else:
             #sender is not connected, send message back to server stating such
-            self.transport.write('{"clientType":"chatserver", "messageType":"FAIL"}')
+            self.transport.write('{"clientType":"chatserver", "messageType":"FAIL"}\n')
 
         self.printInfo()
 
@@ -344,7 +351,8 @@ class SurgeChatProtocol(protocol.Protocol):
 
     #is the json message formatted appropriately for a server message?
     def isServerMessage(self,jsonMsg):
-        serverMsgFields = ('clientType','messageType', 'conversationID', 'senderID', 'recipientID', 'message')
+        print jsonMsg
+        serverMsgFields = ('clientType','messageType', 'senderID', 'recipientID', 'message')
         if all (field in jsonMsg for field in serverMsgFields):
             if jsonMsg["clientType"] == 'surgeserver' and jsonMsg["messageType"] == 'chat':
                 return True
