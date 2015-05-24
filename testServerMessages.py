@@ -1,4 +1,5 @@
 #practice using python socket programming
+import base64
 import socket   #for socket
 import os
 import errno
@@ -67,7 +68,8 @@ while True:
       #print("Send Failed")
     state = "challengeResponse"
   elif state == "challengeResponse":
-    message = '{"clientType":"surgeserver", "messageType":"challengeResponse", "responseToken":"", "responseIV":"1111111111111111"}'
+    responseIV = "1234567890123456"
+    message = '{"clientType":"surgeserver", "messageType":"challengeResponse", "responseToken":"", "responseIV":"'+responseIV+'"}'
     try:
       s.sendall(message.encode())
     except (OSError,TypeError) as e:
@@ -75,12 +77,12 @@ while True:
       print("Send Failed")
     state = "connected"
   elif state == "connected":
-    cv = input ("enter conversation ID:")
     u1 = input ("enter senderID:")
-    u2 = input ("enter recipientID:")
-    msg = input("msg from "+u1+" to "+u2+":")
-    msg.replace('"','\"')
-    message = '{"clientType":"surgeserver", "messageType":"chat", "conversationID":"'+cv+'", "senderID":"'+u1+'", "recipientID":"'+u2+'", "message":"'+msg+'"}'
+    u2 = input ("enter a comma separated list of recipient ids:")
+    u2.strip()
+    ms = input("msg from "+u1+" to ["+u2+"]:\n")
+    msg = '{"msg":"'+ms+'"}'
+    message = '{"clientType":"surgeserver", "messageType":"chat", "senderID":"'+u1+'", "recipientID":['+u2+'], "message":'+msg+'}'
     try:
       s.sendall(message.encode())
     except (OSError,TypeError) as e:
