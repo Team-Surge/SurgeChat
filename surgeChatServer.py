@@ -20,6 +20,7 @@ class SurgeChatProtocol(protocol.Protocol):
     serverChallengeToken = None
     #when a client makes a connection to the server, this runs
     def connectionMade(self):
+        print '===================================='
         print 'new client connected'
         self.factory.client_count += 1
         #initialize state and enumerators neede to maintain state
@@ -37,11 +38,29 @@ class SurgeChatProtocol(protocol.Protocol):
             print 'connection with',self.clientName,'has been lost!'
             print 'current client count:', self.factory.client_count 
 
+    def printInfo(self):
+        # just print some data about connected users and conversations
+        print '===================================='
+        print 'active conversations:'
+        for key in self.factory.activeConversations:
+            print 'conversation:' + key + ', users:',
+            for i in self.factory.activeConversations[key]: 
+                print i + ', ',
+            print ''
+        print ''
+        print 'current users:'
+        for u in self.factory.connectedClients:
+            print 'user:' + u + ', conversations:',
+            for i in self.factory.connectedClients[u]['conversations']:
+                print i + ', ',
+            print ''
+        print '===================================='
+        print ''
+
 
     #Whenever the server recieves data from any of the clients, this method
     #will run
     def dataReceived(self, line):
-        print line
         #print self.factory.connectedClients
         if self.state == self.states.REGISTER:
             self.handle_REGISTER(line)
@@ -64,22 +83,24 @@ class SurgeChatProtocol(protocol.Protocol):
         if self.isServerAuthRequest(inputMsg):
             print 'This is the Server Message!'
             serverMsg = json.loads(line)
-            print serverMsg
+            #print serverMsg
             
             #This is the initial connection message from the server
             #Now we need to challenge it to make sure it's the real
             #deal. We will send a random string with length of 128 chars
             self.serverChallengeToken = randomMsg(128) 
             challengeMsg = '{ "clientType":"surgechat", "messageType":"challenge", "challengeToken":"' + self.serverChallengeToken + '"}'
-            print challengeMsg
+            #print challengeMsg
             self.transport.write(challengeMsg)
             self.state = self.states.CHALLENGE_SERVER
 
         elif self.isClientConnectRequest(inputMsg):
+            print ''
+            print '***********************************'
             print 'This is a Client Message!'
             clientMsg = json.loads(line)
             self.clientName = clientMsg["senderID"]
-            print clientMsg 
+            #print clientMsg 
 
             #check if current connections userID already exists in the connected
             #client dictionary, if so, this is a client is either an imposter or
@@ -100,16 +121,13 @@ class SurgeChatProtocol(protocol.Protocol):
                 #close this connection
                 self.transport.loseConnection()
 
+            self.printInfo()
         else:
             #this message was not formatted properly for either a normal client, nor the surge server
             print 'invalid request from client, closing client connection'
             self.transport.loseConnection()
 
 
-    ################################################################################################
-    #TODO: Implement AES encryption for initial authentication between Surge Server and Chat Server
-    #      Details in the chat outline document
-    ################################################################################################
     #The server has sent me a response to my challenge, I will now check its
     #returned encoded string to see if it matches my encoded string
     def handle_CHALLENGE(self, line):
@@ -126,7 +144,7 @@ class SurgeChatProtocol(protocol.Protocol):
         decryption_suite = AES.new(self.factory.aesKey, AES.MODE_CBC, parsedResponse["responseIV"])
         responseToken = decryption_suite.decrypt(base64.b64decode(parsedResponse["responseToken"]))
 
-        print parsedResponse
+        #print parsedResponse
         #if responseToken == self.serverChallengeToken:
         if True:
             print 'The response is correct!'
@@ -157,28 +175,69 @@ class SurgeChatProtocol(protocol.Protocol):
 
         #if it is a proper server message, do stuff
         print 'server message recieved'
-        print serverMsg
+        #print serverMsg
 
+        #TODO: Tom is going to send me a list of user id's instead. So I can just iterate through
+        #the list and send off messages (so start factoring out sender and recipient)
         conversation = serverMsg["conversationID"]
         sender = serverMsg["senderID"]
         recipient = serverMsg["recipientID"]
         message = serverMsg["message"]
         
-        #if the conversation isn't in the currently active conversations
-        #list, add it to the list, along with sender and recipient
-        if conversation not in self.factory.activeConversations:
-            self.factory.activeConversations[conversation] = [sender,recipient]
-            print 'added conversation'
         
-        #check if recipient is connected to chat server
-        if recipient in self.factory.connectedClients:
-            #the recipient is connected, so let's send the message off
-            #to them
+        if self.isConnectedClient(sender) == True:
             chatMsg = '{"clientType":"chatserver", "messageType":"chat", "conversationID":"'+conversation+'", "senderID":"'+sender+'", "message":"'+message+'" }'
-            self.factory.connectedClients[recipient].transport.write(chatMsg.encode('utf8','replace'))
+
+            #NOTE: when tom sends me the list of recipients, all I have to do is send info off to them. Conversation IDs aren't even
+            #needed
+            #for user in recipients:
+            #    self.factory.connectedClients[user]["connection"].transport.write(chatMsg.encode('utf8','replace'))
+
+            #if the conversation isn't in the currently active conversations
+            #list, add it to the list, along with sender and recipient
+            if conversation not in self.factory.activeConversations:
+                #add conversation to active conversations, and associate it with sender and recipient
+                #NOTE: to generalize for group messaging, surgeserver should send down a list of everyone
+                #      who is associated with the conversation. This way I can iterate through the list and send
+                #      them all off to connected clients who are associated with the conversation
+                self.factory.activeConversations[conversation] = set()
+                self.factory.activeConversations[conversation].add(sender)
+                self.factory.activeConversations[conversation].add(recipient)
+                #for user in recipients:
+                #   self.factory.activeConversations[conversation].add(user)
+
+                if sender in self.factory.activeConversations[conversation]:
+                    for user in self.factory.activeConversations[conversation]:
+                        #forward the message to every user except for the sender, as long as they are connected
+                        #also make sure they have an association with the conversation
+                        if self.isConnectedClient(user):
+                            self.factory.connectedClients[user]["conversations"].add(conversation)
+                            if user != sender and self.isConnectedClient(recipient):
+                                self.factory.connectedClients[recipient]["connection"].transport.write(chatMsg.encode('utf8','replace'))
+                    print self.factory.connectedClients
+                else:
+                    print 'sender is not a part of conversation ' + conversation
+            else:
+                #the conversation exists, and for each user in the conversation, forward the senders
+                #message to them
+                #NOTE: This is not necessary for conversations limited to 2 clients, but allows us to implement
+                #      group chats later on, where there can be more than 2 users in a single conversation
+                if sender in self.factory.activeConversations[conversation]:
+                    for user in self.factory.activeConversations[conversation]:
+                        #forward the message to every user except for the sender, as long as they are connected
+                        #also make sure they have an association with the conversation
+                        if self.isConnectedClient(user):
+                            self.factory.connectedClients[user]["conversations"].add(conversation)
+                            if user != sender and self.isConnectedClient(recipient):
+                                self.factory.connectedClients[recipient]["connection"].transport.write(chatMsg.encode('utf8','replace'))
+                    print self.factory.connectedClients
+                else:
+                    print 'sender is not a part of conversation ' + conversation
         else:
-            #recipient is not connected, send message back to server stating such
+            #sender is not connected, send message back to server stating such
             self.transport.write('{"clientType":"chatserver", "messageType":"FAIL"}')
+
+        self.printInfo()
 
 
 
@@ -194,9 +253,8 @@ class SurgeChatProtocol(protocol.Protocol):
             print 'bad request from client', self.clientName
             self.transport.write('ERROR: Improper Request\n')
             return
-
-        print 'Message received from',clientMsg["senderID"]
-        print clientMsg 
+        #print 'Message received from',clientMsg["senderID"]
+        #print clientMsg 
 
 
     #add the name of the currently connected client to the connectedClients list
@@ -206,13 +264,23 @@ class SurgeChatProtocol(protocol.Protocol):
         #add this client's protocol object to the dictionary, where the key is the
         #id of the client and the value is the protcol object. The protocol object
         #is needed in order to send data to the specific clients
-        self.factory.connectedClients[self.clientName] = self
+        clientInfo = dict()
+        clientInfo["connection"] = self
+        clientInfo["conversations"] = set()
+        self.factory.connectedClients[self.clientName] = clientInfo
 
         #print the ids of the currently connect clients
-        print 'connected clients:',
-        for key in self.factory.connectedClients:
-            print key,
-        print ''
+        #print 'connected clients:',
+        #for key in self.factory.connectedClients:
+        #    print key,
+        #print ''
+
+
+    #Is this client currently connected to the chat server?
+    def isConnectedClient(self,clientID):
+        if clientID in self.factory.connectedClients:
+            return True
+        return False
 
 
     #Is this a properly formatted client AND is the senderID match up
@@ -272,24 +340,6 @@ class SurgeChatProtocol(protocol.Protocol):
             if jsonMsg["clientType"] == 'surgeclient' and jsonMsg["messageType"] == 'something':
                 return True
         return False
-        #if 'clientType' not in jsonMsg:
-        #    return False
-
-        #if jsonMsg["clientType"] != 'surgeclient':
-        #    return False
-
-        #if 'messageType' not in jsonMsg:
-        #    return False
-
-        #if 'senderID' not in jsonMsg:
-        #    return False
-
-        #if 'message' not in jsonMsg:
-        #    return False
-
-        ## all the previous conditions didn't hold, so we have
-        ## a valid client message
-        #return True
 
 
     #is the json message formatted appropriately for a server message?
@@ -299,33 +349,6 @@ class SurgeChatProtocol(protocol.Protocol):
             if jsonMsg["clientType"] == 'surgeserver' and jsonMsg["messageType"] == 'chat':
                 return True
         return False
-       # if 'clientType' not in jsonMsg:
-       #     return False
-       # 
-       # if jsonMsg["clientType"] != 'surgeserver':
-       #     return False
-
-       # if 'messageType' not in jsonMsg:
-       #     return False
-
-       # if 'serverToken' not in jsonMsg:
-       #     return False
-
-       # if 'conversationID' not in jsonMsg:
-       #     return False
-
-       # if 'senderID' not in jsonMsg:
-       #     return False
-       # 
-       # if 'recipientID' not in jsonMsg:
-       #     return False
-
-       # if 'message' not in jsonMsg:
-       #     return False
-       # 
-       # # all the previous conditions didn't hold, so we have
-       # # a valid server message
-       # return True
 
 
 #stores info about all connections
@@ -334,13 +357,14 @@ class surgeFactory(protocol.ServerFactory):
 
     #possible states and client types for chat server clients
     states = enum('REGISTER','IS_CLIENT','IS_SERVER','CHALLENGE_SERVER')
-    clientTypes = enum('surgeserver', 'surgeclient')
+    clientTypes = enum('surgeserver', 'surgeclient', 'surgechat')
 
     #number of clients that are currently connected to chat server
     client_count = 0
 
     aesKey = 'My AES Key bitch'
 
+    #TODO: add the list of active conversations the user is participating in
     #dictionary of connected clients, keys are user ids, values
     #are protocols that belong to the respective user connections
     connectedClients = {}

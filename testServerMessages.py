@@ -79,6 +79,7 @@ while True:
     u1 = input ("enter senderID:")
     u2 = input ("enter recipientID:")
     msg = input("msg from "+u1+" to "+u2+":")
+    msg.replace('"','\"')
     message = '{"clientType":"surgeserver", "messageType":"chat", "conversationID":"'+cv+'", "senderID":"'+u1+'", "recipientID":"'+u2+'", "message":"'+msg+'"}'
     try:
       s.sendall(message.encode())

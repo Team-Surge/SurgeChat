@@ -1,4 +1,5 @@
 #!/bin/env/python
+import sys
 from surgeUtilities import *
 from twisted.internet import reactor, protocol, endpoints
 from twisted.internet.defer import Deferred
@@ -19,8 +20,12 @@ class SurgeTestClientProtocol(protocol.Protocol):
 
   def dataReceived(self, line):
     print line
-    msg = json.loads(line)
-    print msg["senderID"] + ':', msg["message"]
+    try:
+      msg = json.loads(line)
+      print msg["senderID"] + ':', msg["message"]
+    except:
+      sys.exit()
+      pass
 
 
 class SurgeTestClientFactory(protocol.ClientFactory):
