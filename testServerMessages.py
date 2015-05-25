@@ -60,6 +60,7 @@ while True:
   time.sleep(1)
   if state == "connectRequest":
     message = '{"clientType":"surgeserver", "messageType":"connectRequest"}'
+    #message = '{"clientType":"surgeserver", "messageType":"chat", "senderID":"fakeID", "recipientID":["irrelevantUser"], "message":{"msg":"hi!"}}'
     try:
       s.sendall(message.encode())
     except (OSError,TypeError) as e:

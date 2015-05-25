@@ -71,53 +71,63 @@ class SurgeChatProtocol(protocol.Protocol):
         serverMsg = None
         clientMsg = None
 
-        if self.isServerAuthRequest(inputMsg):
-            print 'This is the Server Message!'
-            serverMsg = json.loads(line)
-            #print serverMsg
-            
-            #This is the initial connection message from the server
-            #Now we need to challenge it to make sure it's the real
-            #deal. We will send a random string with length of 128 chars
-            self.serverChallengeToken = randomMsg(128) 
-            challengeMsg = '{"clientType":"surgechat", "messageType":"challenge", "challengeToken":"' + self.serverChallengeToken + '"}\n'
-            #print challengeMsg
-            self.transport.write(challengeMsg)
-            print 'sent challenge'
-            self.state = self.states.CHALLENGE_SERVER
+        #is this a message from the surge server, or a surge client
+        if 'clientType' in inputMsg and inputMsg["clientType"] == 'surgeserver':
+            if self.isServerAuthRequest(inputMsg):
+                print 'This is the Server Message!'
+                serverMsg = json.loads(line)
+                #print serverMsg
+                
+                #This is the initial connection message from the server
+                #Now we need to challenge it to make sure it's the real
+                #deal. We will send a random string with length of 128 chars
+                self.serverChallengeToken = randomMsg(128) 
+                challengeMsg = '{"clientType":"surgechat", "messageType":"challenge", "challengeToken":"' + self.serverChallengeToken + '"}\n'
 
-        elif self.isClientConnectRequest(inputMsg):
-            print ''
-            print '***********************************'
-            print 'This is a Client Message!'
-            clientMsg = json.loads(line)
-            self.clientName = clientMsg["senderID"]
-            #print clientMsg 
-
-            #check if current connections userID already exists in the connected
-            #client dictionary, if so, this is a client is either an imposter or
-            #is trying to log in to chat from 2 different phones, which is not allowed.
-            #deny this connection
-            if self.clientName not in self.factory.connectedClients:
-                self.addClient()
-                self.state = self.states.IS_CLIENT
-
+                #print challengeMsg
+                self.transport.write(challengeMsg)
+                print 'sent challenge'
+                self.state = self.states.CHALLENGE_SERVER
             else:
-                print self.clientName,'is already connected to chat server'
-                self.transport.write('only 1 connection to chat server per user')
+                print 'The server needs to authenticate'
+                self.transport.write('{"clientType":"surgechat", "messageType":"FAIL_AUTH"}\n')
 
-                #reset client name so we don't accidentally kick off the other
-                #connection
-                self.clientName = ''
+        elif 'clientType' in inputMsg and inputMsg["clientType"] == 'surgeclient':
+            if self.isClientConnectRequest(inputMsg):
+                print ''
+                print '***********************************'
+                print 'This is a Client Message!'
+                clientMsg = json.loads(line)
+                self.clientName = clientMsg["senderID"]
+                #print clientMsg 
 
-                #close this connection
-                self.transport.loseConnection()
+                #check if current connections userID already exists in the connected
+                #client dictionary, if so, this is a client is either an imposter or
+                #is trying to log in to chat from 2 different phones, which is not allowed.
+                #deny this connection
+                if self.clientName not in self.factory.connectedClients:
+                    self.addClient()
+                    self.state = self.states.IS_CLIENT
 
-            self.printInfo()
+                else:
+                    print self.clientName,'is already connected to chat server'
+                    self.transport.write('only 1 connection to chat server per user')
+
+                    #reset client name so we don't accidentally kick off the other
+                    #connection
+                    self.clientName = ''
+
+                    #close this connection
+                    self.transport.loseConnection()
+
+                self.printInfo()
+            else:
+                print 'client must request connection first'
+                self.transport.write('{"clientType":"surgechat", "messageType":"FAIL_CONNECT"}\n')
         else:
             #this message was not formatted properly for either a normal client, nor the surge server
             print 'invalid request from client, closing client connection'
-            self.transport.loseConnection()
+            self.transport.write('{"clientType":"surgechat", "messageType":"FAIL_FORMAT"')
 
 
     #The server has sent me a response to my challenge, I will now check its
@@ -129,22 +139,23 @@ class SurgeChatProtocol(protocol.Protocol):
 
         if self.isServerChallengeResponse(parsedResponse) == False:
             print 'ERROR: challenge response is wrong format'
-            self.transport.write('challenge fail')
+            self.transport.write('{"clientType":"surgechat","messageType":"FAIL_CHALLENGE"}\n')
+            self.state = self.states.REGISTER
             return
 
         # Decryption
-        #decryption_suite = AES.new(self.factory.aesKey, AES.MODE_CBC, base64.b64decode(parsedResponse["responseIV"]))
-        #responseToken = decryption_suite.decrypt(base64.b64decode(parsedResponse["responseToken"]))
+        decryption_suite = AES.new(self.factory.aesKey, AES.MODE_CBC, base64.b64decode(parsedResponse["responseIV"]))
+        responseToken = decryption_suite.decrypt(base64.b64decode(parsedResponse["responseToken"]))
 
         #print parsedResponse
-        #if responseToken == self.serverChallengeToken:
-        if True:
+        if responseToken == self.serverChallengeToken:
             print 'The response is correct!'
             self.transport.write('{"clientType":"chatserver", "messageType":"OK"}\n')
             self.state = self.states.IS_SERVER
         else:
             print 'Surge response is bad'
-            self.transport.write('{"clientType":"chatserver", "messageType":"FAIL"}\n')
+            self.transport.write('{"clientType":"chatserver", "messageType":"FAIL_CHALLENGE"}\n')
+            self.state = self.states.REGISTER
 
 
     #when the server sends a valid message containing information about a message, such as the
@@ -160,6 +171,7 @@ class SurgeChatProtocol(protocol.Protocol):
         #if the message isn't formatted properly, send nothing
         if self.isServerMessage(serverMsg) == False:
             print 'ERROR: bad message format'
+            self.transport.write('{"clientType":"surgechat","messageType":"FAIL_FORMAT"}\n')
             return
 
         sender = serverMsg["senderID"]
