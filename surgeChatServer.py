@@ -196,7 +196,7 @@ class SurgeChatProtocol(protocol.Protocol):
         for user in recipients:
             if self.isConnectedClient(str(user)):
                 print 'sending to',user
-                self.factory.connectedClients[str(user)].transport.write(chatMsg.encode('utf8','replace'))
+                self.factory.connectedClients[str(user)].transport.write(chatMsg)
             else:
                 print 'user',str(user),'is not connected'
 
